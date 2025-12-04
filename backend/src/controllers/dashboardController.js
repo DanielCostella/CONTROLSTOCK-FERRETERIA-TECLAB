@@ -6,11 +6,11 @@ export const getDashboardResumen = async (req, res) => {
     // Total de productos
     const [totalProductos] = await pool.query('SELECT COUNT(*) as total FROM producto');
     
-    // Productos con stock bajo (≤ 5)
-    const [stockBajo] = await pool.query('SELECT COUNT(*) as total FROM producto WHERE stock <= 5');
+    // Productos con stock bajo (stock_actual <= stock_minimo)
+    const [stockBajo] = await pool.query('SELECT COUNT(*) as total FROM producto WHERE stock_actual <= stock_minimo AND stock_actual > 0');
     
     // Productos sin stock
-    const [sinStock] = await pool.query('SELECT COUNT(*) as total FROM producto WHERE stock = 0');
+    const [sinStock] = await pool.query('SELECT COUNT(*) as total FROM producto WHERE stock_actual = 0 OR estado = "sin_stock"');
     
     // Movimientos de hoy
     const hoy = new Date().toISOString().split('T')[0];
@@ -61,7 +61,7 @@ export const getProductosMasVendidos = async (req, res) => {
         p.nombre,
         SUM(m.cantidad) as totalVendido
       FROM movimiento_stock m
-      JOIN producto p ON m.id_producto = p.id
+      JOIN producto p ON m.producto_id = p.id
       WHERE m.tipo = 'salida' AND m.fecha >= ?
       GROUP BY p.id, p.nombre
       ORDER BY totalVendido DESC

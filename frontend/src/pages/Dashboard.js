@@ -1,6 +1,30 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 
 const Dashboard = () => {
+  const [stats, setStats] = useState({
+    totalProductos: 0,
+    stockBajo: 0,
+    sinStock: 0,
+    movimientosHoy: 0
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const response = await axios.get('http://localhost:3001/api/dashboard/resumen');
+        setStats(response.data);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error al cargar dashboard:', error);
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
   return (
     <div>
       <div className="mb-6">
@@ -19,7 +43,9 @@ const Dashboard = () => {
             </div>
             <div className="ml-4">
               <p className="text-sm text-gray-500">Total Productos</p>
-              <p className="text-2xl font-semibold text-gray-900">-</p>
+              <p className="text-2xl font-semibold text-gray-900">
+                {loading ? '...' : stats.totalProductos}
+              </p>
             </div>
           </div>
         </div>
@@ -33,7 +59,9 @@ const Dashboard = () => {
             </div>
             <div className="ml-4">
               <p className="text-sm text-gray-500">Stock Bajo</p>
-              <p className="text-2xl font-semibold text-gray-900">-</p>
+              <p className="text-2xl font-semibold text-gray-900">
+                {loading ? '...' : stats.stockBajo}
+              </p>
             </div>
           </div>
         </div>
@@ -47,7 +75,9 @@ const Dashboard = () => {
             </div>
             <div className="ml-4">
               <p className="text-sm text-gray-500">Sin Stock</p>
-              <p className="text-2xl font-semibold text-gray-900">-</p>
+              <p className="text-2xl font-semibold text-gray-900">
+                {loading ? '...' : stats.sinStock}
+              </p>
             </div>
           </div>
         </div>
@@ -61,17 +91,19 @@ const Dashboard = () => {
             </div>
             <div className="ml-4">
               <p className="text-sm text-gray-500">Movimientos Hoy</p>
-              <p className="text-2xl font-semibold text-gray-900">-</p>
+              <p className="text-2xl font-semibold text-gray-900">
+                {loading ? '...' : stats.movimientosHoy}
+              </p>
             </div>
           </div>
         </div>
       </div>
       
-      {/* Próximamente conectaremos con la API */}
+      {/* Información adicional */}
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-semibold mb-4">Próximos pasos</h3>
+        <h3 className="text-lg font-semibold mb-4">Estado del Sistema</h3>
         <p className="text-gray-600">
-          En breve conectaremos estas tarjetas con los datos reales del backend.
+          {loading ? 'Cargando datos...' : 'Dashboard conectado exitosamente con el backend ✓'}
         </p>
       </div>
     </div>

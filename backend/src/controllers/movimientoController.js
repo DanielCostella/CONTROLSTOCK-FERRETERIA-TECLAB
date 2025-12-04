@@ -5,14 +5,14 @@ import pool from '../db.js';
 export const getMovimientos = async (req, res) => {
   try {
     const filtros = [
-      { campo: 'id_ticket', valor: req.query.id_ticket },
-      { campo: 'id_producto', valor: req.query.producto },
+      { campo: 'ticket_id', valor: req.query.ticket_id },
+      { campo: 'producto_id', valor: req.query.producto },
       { campo: 'tipo', valor: req.query.tipo },
       { campo: 'fecha >=', valor: req.query.desde },
       { campo: 'fecha <=', valor: req.query.hasta }
     ];
 
-    let query = 'SELECT * FROM movimiento_stock';
+    let query = 'SELECT * FROM movimiento_stock ORDER BY fecha DESC';
     let conditions = [];
     let params = [];
 
@@ -28,7 +28,7 @@ export const getMovimientos = async (req, res) => {
     });
 
     if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
+      query = 'SELECT * FROM movimiento_stock WHERE ' + conditions.join(' AND ') + ' ORDER BY fecha DESC';
     }
 
     const [rows] = await pool.query(query, params);
@@ -40,20 +40,18 @@ export const getMovimientos = async (req, res) => {
 
 // Crear un nuevo movimiento de stock
 export const createMovimiento = async (req, res) => {
-  const { id_producto, tipo, cantidad, fecha, id_usuario, id_proveedor, id_cliente, observaciones, id_ticket } = req.body;
+  const { producto_id, tipo, cantidad, motivo, proveedor_id, cliente_id } = req.body;
+  const usuario_id = req.user?.id || 1; // Del token JWT
 
-  // Si no se proporciona fecha, usar la fecha y hora actual
-  const fechaMovimiento = fecha || new Date().toISOString().slice(0, 19).replace('T', ' '); // Formato YYYY-MM-DD HH:MM:SS
-
-  // Validaciones usando array de reglas
+  // Validaciones
   const reglas = [
-    { valido: !!id_producto, error: 'id_producto es obligatorio' },
+    { valido: !!producto_id, error: 'producto_id es obligatorio' },
     { valido: !!tipo, error: 'tipo es obligatorio' },
     { valido: !!cantidad, error: 'cantidad es obligatoria' },
-    { valido: !!id_usuario, error: 'id_usuario es obligatorio' },
     { valido: ['entrada', 'salida'].includes(tipo), error: 'El tipo debe ser "entrada" o "salida"' },
     { valido: !isNaN(cantidad) && cantidad > 0, error: 'La cantidad debe ser un número mayor a cero' },
-    { valido: typeof fechaMovimiento === 'string' && fechaMovimiento.length >= 10, error: 'La fecha debe tener formato válido' }
+    { valido: tipo !== 'entrada' || !!proveedor_id, error: 'proveedor_id es obligatorio para entradas' },
+    { valido: tipo !== 'salida' || !!cliente_id, error: 'cliente_id es obligatorio para salidas' }
   ];
   const errorRegla = reglas.find(r => !r.valido);
   if (errorRegla) {
@@ -66,45 +64,45 @@ export const createMovimiento = async (req, res) => {
 
     // Validar stock suficiente si es salida
     if (tipo === 'salida') {
-      const [rows] = await conn.query('SELECT stock FROM producto WHERE id = ?', [id_producto]);
+      const [rows] = await conn.query('SELECT stock_actual FROM producto WHERE id = ?', [producto_id]);
       if (!rows.length) throw new Error('Producto no encontrado');
-      if (rows[0].stock < cantidad) {
-        throw new Error(`Stock insuficiente. Stock actual: ${rows[0].stock}, cantidad solicitada: ${cantidad}`);
+      if (rows[0].stock_actual < cantidad) {
+        throw new Error(`Stock insuficiente. Stock actual: ${rows[0].stock_actual}, cantidad solicitada: ${cantidad}`);
       }
       
-      // Validación adicional: asegurar que el stock nunca sea negativo
-      const stockResultante = rows[0].stock - cantidad;
-      if (stockResultante < 0) {
-        throw new Error('Error: El stock resultante sería negativo');
-      }
-      
-      await conn.query('UPDATE producto SET stock = stock - ? WHERE id = ?', [cantidad, id_producto]);
+      await conn.query('UPDATE producto SET stock_actual = stock_actual - ? WHERE id = ?', [cantidad, producto_id]);
       
       // Verificar si el producto queda sin stock y actualizar estado
-      const [newStockRows] = await conn.query('SELECT stock FROM producto WHERE id = ?', [id_producto]);
-      if (newStockRows[0].stock === 0) {
-        await conn.query('UPDATE producto SET estado = "sin_stock" WHERE id = ?', [id_producto]);
-      } else if (newStockRows[0].stock < 0) {
-        // Protección adicional: revertir si algo salió mal
-        throw new Error('Error crítico: Stock negativo detectado');
+      const [newStockRows] = await conn.query('SELECT stock_actual FROM producto WHERE id = ?', [producto_id]);
+      if (newStockRows[0].stock_actual === 0) {
+        await conn.query('UPDATE producto SET estado = "sin_stock" WHERE id = ?', [producto_id]);
       }
     } else if (tipo === 'entrada') {
-      await conn.query('UPDATE producto SET stock = stock + ? WHERE id = ?', [cantidad, id_producto]);
+      await conn.query('UPDATE producto SET stock_actual = stock_actual + ? WHERE id = ?', [cantidad, producto_id]);
       
       // Si era sin stock y ahora tiene stock, cambiar a disponible
-      const [newStockRows] = await conn.query('SELECT stock FROM producto WHERE id = ?', [id_producto]);
-      if (newStockRows[0].stock > 0) {
-        await conn.query('UPDATE producto SET estado = "disponible" WHERE id = ?', [id_producto]);
+      const [newStockRows] = await conn.query('SELECT stock_actual FROM producto WHERE id = ?', [producto_id]);
+      if (newStockRows[0].stock_actual > 0) {
+        await conn.query('UPDATE producto SET estado = "disponible" WHERE id = ?', [producto_id]);
       }
     }
 
     const [result] = await conn.query(
-      'INSERT INTO movimiento_stock (id_producto, tipo, cantidad, fecha, id_usuario, id_proveedor, id_cliente, observaciones, id_ticket) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [id_producto, tipo, cantidad, fechaMovimiento, id_usuario, id_proveedor, id_cliente, observaciones, id_ticket || null]
+      'INSERT INTO movimiento_stock (producto_id, tipo, cantidad, motivo, usuario_id, proveedor_id, cliente_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [producto_id, tipo, cantidad, motivo || null, usuario_id, tipo === 'entrada' ? proveedor_id : null, tipo === 'salida' ? cliente_id : null]
     );
 
     await conn.commit();
-    res.status(201).json({ id: result.insertId, id_producto, tipo, cantidad, fecha: fechaMovimiento, id_usuario, id_proveedor, id_cliente, observaciones, id_ticket });
+    res.status(201).json({ 
+      id: result.insertId, 
+      producto_id, 
+      tipo, 
+      cantidad, 
+      motivo, 
+      usuario_id, 
+      proveedor_id: tipo === 'entrada' ? proveedor_id : null,
+      cliente_id: tipo === 'salida' ? cliente_id : null
+    });
   } catch (error) {
     await conn.rollback();
     res.status(500).json({ error: error.message });
